@@ -21,7 +21,7 @@ What we learned is that it is hard to pick a best model in a very limited time f
 2. Choose different variables and compare the results of different models;
 3. Explore more options of modeling techniques (neural networks, basic logistic/penalized regression models, etc)
 
-##Reference: 
+## Reference: 
 
 https://datatricks.co.uk/one-hot-encoding-in-r-three-simple-methods
 
