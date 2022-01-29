@@ -1,0 +1,299 @@
+---
+title: "Datathon 2022 Beginner's Track"
+author: "Derek Fu"
+date: "2022/1/28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 0. Libraries
+
+```{r include=FALSE}
+
+set.seed(77)
+
+library(readr)
+library(dplyr)
+library(imbalance)
+library(caret)
+library(DMwR)
+library(rsample)
+library(randomForest)
+library(xgboost)
+library(pROC)
+
+```
+
+
+## 1. Loading The Dataset  
+
+```{r}
+
+data <- read_csv("track.csv")
+
+head(data)
+
+```
+
+## 2. Explanatory Data Analysis  
+
+1. Cleaning the dataset (removing NA values/insignificant variables)
+
+```{r}
+
+cleaned_data <- data[data$state_code == "TX", ]
+
+cleaned_data <- data[, -c(1:5, 7:10, 13:21, 25:36, 38)]
+
+cleaned_data <- na.omit(cleaned_data)
+
+dim(cleaned_data)
+
+write.csv(cleaned_data,"data.csv", row.names = FALSE)
+
+```
+
+2. About the dependent variable: "accepted"
+
+```{r}
+
+barplot(prop.table(table(cleaned_data$accepted)),
+        main = "Exploring Class Imbalance",
+        col = c("red", "blue"))
+
+```
+
+3. Use SMOTE to balance the skewed dataset (undersampling):  
+
+```{r}
+
+prop.table(table(cleaned_data$accepted))
+
+```
+
+```{r}
+
+cleaned_data$accepted <- as.numeric(cleaned_data$accepted)
+
+dummy <- dummyVars(" ~ .", data = cleaned_data)
+
+new_data <- data.frame(predict(dummy, newdata = cleaned_data))
+
+new_data$accepted <- as.factor(new_data$accepted)
+
+new_data <- as.data.frame(new_data)
+
+#new_data <- SMOTE(accepted ~ ., new_data, perc.over = 100, perc.under=200)
+
+#new_data$accepted <- as.numeric(new_data$accepted)
+
+#new_data$accepted <- ifelse(new_data$accepted == 1, 0, 1)
+
+```
+
+This part takes a long time to run. Here, we import the csv file of this new dataset again.  
+
+
+## 3. Building Models  
+
+1. Scale the numerical values, then split training and testing datasets:  
+
+```{r}
+
+new_data <- read_csv("encoded_data.csv")
+
+new_data$accepted <- as.factor(new_data$accepted)
+
+new_data$income <- scale(new_data$income)
+
+new_data$combined_loan_to_value_ratio <- scale(new_data$combined_loan_to_value_ratio)
+
+new_data$balloon_payment <- as.factor(new_data$balloon_payment)
+
+new_data$business_or_commercial_purpose <- as.factor(new_data$business_or_commercial_purpose)
+
+```
+
+```{r}
+
+split= initial_split(new_data, prop = 3/4, strata = accepted)
+
+train_data <- training(split)
+
+test_data  <- testing(split)
+
+train_data <- as.data.frame(train_data)
+
+test_data <- as.data.frame(test_data)
+
+```
+
+2. Build a basic Random Forest Model:  
+
+```{r}
+
+rf <- randomForest(accepted ~., data = train_data, ntree = 1000)
+
+confusionMatrix(predict(rf, test_data), test_data$accepted, positive = '1')
+
+```
+
+3. Train a better Random Forest Model:  
+
+```{r}
+
+model_control <- trainControl(method = "cv", 
+                              number = 10, 
+                              savePredictions = 'final')
+
+# Train Random Forest again using 10-fold cross validation:
+ 
+trained_rf <- train(train_data[, 1:19], train_data[, 20], method = "rf", trControl = model_control)
+
+test_data$rf <- predict(object = trained_rf, test_data[, 1:19])
+
+confusionMatrix(test_data$accepted, test_data$rf)
+
+```
+
+4. Train a KNN (k nearest neighbors) model:  
+
+```{r}
+
+trained_knn <- train(train_data[, 1:19], train_data[, 20], method = "knn", trControl = model_control)
+
+test_data$knn <- predict(object = trained_knn, test_data[, 1:19])
+
+confusionMatrix(test_data$accepted, test_data$knn)
+
+```
+
+5. Train an xgboost model:  
+
+```{r}
+
+cleaned_data$accepted <- as.numeric(cleaned_data$accepted)
+
+dummy <- dummyVars(" ~ .", data = cleaned_data)
+
+xgboost_data <- data.frame(predict(dummy, newdata = cleaned_data))
+
+xgboost_data$accepted <- as.factor(ifelse(xgboost_data$accepted == 1, 0, 1))
+
+xgboost_data <- as.data.frame(xgboost_data)
+
+# Prepare different training and testing data for xgboost:  
+
+split= initial_split(xgboost_data, prop = 3/4, strata = accepted)
+
+xgboost_train_data <- training(split)
+
+xgboost_test_data  <- testing(split)
+
+xgboost_train_data <- as.data.frame(xgboost_train_data)
+
+xgboost_test_data <- as.data.frame(xgboost_test_data)
+
+train_label <- as.numeric(xgboost_train_data[, 20]) - 1
+
+test_label <- as.numeric(xgboost_test_data[, 20]) - 1
+
+# Change to xgb.DMatrix
+
+dtrain <- xgb.DMatrix(data = as.matrix(xgboost_train_data[, c(1:19)]), label = train_label)
+
+dtest <- xgb.DMatrix(data = as.matrix(xgboost_test_data[, c(1:19)]), label = test_label)
+
+```
+
+```{r}
+
+denial <- sum(xgboost_data$accepted == 0)
+accepted <- sum(xgboost_data$accepted == 1)
+
+xgboost_model <- xgboost(data = dtrain, 
+                        nfold = 10,
+                        max.depth = 3, 
+                        nround = 10, 
+                        early_stopping_rounds = 3,
+                        objective = "binary:logistic", 
+                        scale_pos_weight = denial/accepted,
+                        eval_metric = "auc")
+
+
+pred <- predict(xgboost_model, dtest)
+
+
+error <- mean(as.numeric(pred > 0.5) != test_label)
+
+error
+
+```
+
+```{r}
+
+plot(pROC::roc(response = test_label,
+               predictor = pred,
+               levels=c(0, 1)),
+     lwd=1.5) 
+
+```
+
+```{r}
+
+confusionMatrix(as.factor(ifelse(pred < 0.5, 0, 1)), as.factor(test_label))
+
+```
+
+Apply xgboost to modified dataset:  
+
+```{r}
+
+train_label <- as.numeric(train_data[, 20]) - 1
+
+test_label <- as.numeric(test_data[, 20]) - 1
+
+dtrain <- xgb.DMatrix(data = as.matrix(train_data[, c(1:16, 19)]), label = train_label)
+
+dtest <- xgb.DMatrix(data = as.matrix(test_data[, c(1:16, 19)]), label = test_label)
+
+xgboost_model <- xgboost(data = dtrain, 
+                        nfold = 10,
+                        max.depth = 6, 
+                        nround = 20, 
+                        early_stopping_rounds = 3,
+                        objective = "binary:logistic", 
+                        eval_metric = "auc")
+
+pred <- predict(xgboost_model, dtest)
+
+error <- mean(as.numeric(pred >= 0.5) != test_label)
+
+error
+
+confusionMatrix(as.factor(ifelse(pred < 0.5, 0, 1)), as.factor(test_label))
+
+test_results$real <- test_label
+test_results$xgb <- as.factor(ifelse(pred < 0.5, 0, 1))
+test_results <- test_results[, c(4, 1, 3, 5)]
+test_results$combined <- round((as.numeric(test_results$rf) + as.numeric(test_results$knn) + as.numeric(test_results$xgb) - 3) / 3)
+
+confusionMatrix(as.factor(test_results$real), as.factor(test_results$combined))
+
+```
+
+```{r}
+
+importance_matrix <- xgb.importance(names(as.matrix(train_data)), model = xgboost_model)
+
+xgb.plot.importance(importance_matrix)
+
+```
+
+## 4. Results from building ensemble model based on undersampling data:  
+
+The overall accuracy is 0.7671 and is good at preventing false positive predictions. It performs better than any single model including random forest, xgboost and KNN.  
+
