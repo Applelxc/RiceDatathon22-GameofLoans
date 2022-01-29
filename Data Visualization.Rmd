@@ -1,0 +1,92 @@
+---
+title: "Datathon Data Visualization"
+author: "Xuanchen (Apple) Li, Jiawen (Sarah) Yao, Tiancheng (Derek) Fu"
+date: "1/28/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Library
+
+```{r, echo=TRUE}
+library(corrplot)
+library(dplyr)
+library(ggplot2)
+```
+
+## Dataset
+
+```{r, echo=TRUE}
+track <- read.csv("~/Documents/Rice/Datathon/track.csv")
+head(track)
+```
+
+Summary of dataset: 
+
+```{r, echo=TRUE}
+summary(track)
+```
+
+Correlation between numeric variables: 
+
+```{r, echo=TRUE}
+all_numeric <- track[-c(2:6, 8:10, 12, 18:20, 25:27, 29, 31:33, 38)]
+all_numeric_filtered <- all_numeric %>% 
+  filter_at(vars(income, combined_loan_to_value_ratio, interest_rate, property_value, total_loan_costs), all_vars(!is.na(.)))
+corrplot(cor(all_numeric_filtered))
+
+```
+
+
+Number of missing values: 
+
+```{r, echo=TRUE}
+sapply(track, function(x) sum(is.na(x)))
+
+```
+
+Main reason for denied requests: 
+
+```{r, echo=TRUE}
+denied <- track[track$accepted == 0,]
+p<-ggplot(data=denied, aes(denial_reason)) +
+  geom_bar() + 
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+p
+```
+
+Exploring correlation between variables: 
+
+```{r, echo=TRUE}
+ggplot(data=track, aes(accepted))+
+  geom_bar(aes(fill=as.factor(applicant_age)), position="fill")
+ggplot(data=track, aes(accepted))+
+  geom_bar(aes(fill=as.factor(race)), position="fill") + 
+  guides(fill=guide_legend(title="Race")) + 
+  labs(title="Correlation between Accepted and Race",
+        x ="Accepted", y = "Count")
+ggplot(data=track, aes(accepted))+
+  geom_bar(aes(fill=as.factor(ethnicity)), position="fill")
+ggplot(data=track, aes(accepted))+
+  geom_bar(aes(fill=as.factor(sex)), position="fill")
+ggplot(data=track, aes(accepted))+
+  geom_bar(aes(fill=as.factor(debt_to_income_ratio)), position="fill") + 
+  guides(fill=guide_legend(title="Debt to Income Ratio")) + 
+  labs(title="Correlation between Accepted and Debt to Income Ratio",
+        x ="Accepted", y = "Count")
+ggplot(data=track, aes(accepted))+
+  geom_bar(aes(fill=as.factor(business_or_commercial_purpose)), position="fill")
+ggplot(data=track, aes(accepted))+
+  geom_bar(aes(fill=as.factor(balloon_payment)), position="fill")
+
+```
+
+
+
+
+
